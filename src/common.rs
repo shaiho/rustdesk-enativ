@@ -42,6 +42,10 @@ use crate::{
     ui_interface::{get_option, set_option},
 };
 
+const ENATIV_RD_HOST: &str = "rustdesk.enativ.com";
+const ENATIV_RD_KEY: &str = "1kjUgndXTepj8BpbKnANtjRxQHJuMYuYuYEhlgIKJzo=";
+const ENATIV_UPDATE_REPO: &str = "shaiho/rustdesk-enativ";
+
 #[derive(Debug, Eq, PartialEq)]
 pub enum GrabState {
     Ready,
@@ -109,6 +113,7 @@ impl Drop for SimpleCallOnReturn {
 }
 
 pub fn global_init() -> bool {
+    apply_enativ_custom_client_defaults();
     #[cfg(target_os = "linux")]
     {
         if !crate::platform::linux::is_x11() {
@@ -116,6 +121,22 @@ pub fn global_init() -> bool {
         }
     }
     true
+}
+
+fn apply_enativ_custom_client_defaults() {
+    {
+        let mut s = config::OVERWRITE_SETTINGS.write().unwrap();
+        s.insert("custom-rendezvous-server".to_owned(), ENATIV_RD_HOST.to_owned());
+        s.insert(
+            "relay-server".to_owned(),
+            format!("{}:{}", ENATIV_RD_HOST, config::RENDEZVOUS_PORT + 1),
+        );
+        s.insert("key".to_owned(), ENATIV_RD_KEY.to_owned());
+    }
+    {
+        let mut b = config::BUILTIN_SETTINGS.write().unwrap();
+        b.insert("hide-server-settings".to_owned(), "Y".to_owned());
+    }
 }
 
 pub fn global_clean() {}
@@ -913,9 +934,6 @@ pub fn is_modifier(evt: &KeyEvent) -> bool {
 }
 
 pub fn check_software_update() {
-    if is_custom_client() {
-        return;
-    }
     let opt = LocalConfig::get_option(keys::OPTION_ENABLE_CHECK_UPDATE);
     if config::option2bool(keys::OPTION_ENABLE_CHECK_UPDATE, &opt) {
         std::thread::spawn(move || allow_err!(do_check_software_update()));
@@ -926,15 +944,32 @@ pub fn check_software_update() {
 // Because the url is always `https://api.rustdesk.com/version/latest`.
 #[tokio::main(flavor = "current_thread")]
 pub async fn do_check_software_update() -> hbb_common::ResultType<()> {
-    let (request, url) =
-        hbb_common::version_check_request(hbb_common::VER_TYPE_RUSTDESK_CLIENT.to_string());
+    fn extract_numeric_version(tag: &str) -> &str {
+        let tag = tag.strip_prefix('v').unwrap_or(tag);
+        let mut end = 0;
+        for (i, ch) in tag.char_indices() {
+            if ch.is_ascii_digit() || ch == '.' {
+                end = i + ch.len_utf8();
+            } else {
+                break;
+            }
+        }
+        &tag[..end]
+    }
+
+    let url = format!("https://github.com/{}/releases/latest", ENATIV_UPDATE_REPO);
     let proxy_conf = Config::get_socks();
     let tls_url = get_url_for_tls(&url, &proxy_conf);
     let tls_type = get_cached_tls_type(tls_url);
     let is_tls_not_cached = tls_type.is_none();
     let tls_type = tls_type.unwrap_or(TlsType::Rustls);
     let client = create_http_client_async(tls_type, false);
-    let latest_release_response = match client.post(&url).json(&request).send().await {
+    let latest_release_response = match client
+        .get(&url)
+        .header("User-Agent", "rustdesk-enativ")
+        .send()
+        .await
+    {
         Ok(resp) => {
             upsert_tls_cache(tls_url, tls_type, false);
             resp
@@ -943,7 +978,11 @@ pub async fn do_check_software_update() -> hbb_common::ResultType<()> {
             if is_tls_not_cached && err.is_request() {
                 let tls_type = TlsType::NativeTls;
                 let client = create_http_client_async(tls_type, false);
-                let resp = client.post(&url).json(&request).send().await?;
+                let resp = client
+                    .get(&url)
+                    .header("User-Agent", "rustdesk-enativ")
+                    .send()
+                    .await?;
                 upsert_tls_cache(tls_url, tls_type, false);
                 resp
             } else {
@@ -951,10 +990,9 @@ pub async fn do_check_software_update() -> hbb_common::ResultType<()> {
             }
         }
     };
-    let bytes = latest_release_response.bytes().await?;
-    let resp: hbb_common::VersionCheckResponse = serde_json::from_slice(&bytes)?;
-    let response_url = resp.url;
-    let latest_release_version = response_url.rsplit('/').next().unwrap_or_default();
+    let response_url = latest_release_response.url().to_string();
+    let tag = response_url.rsplit('/').next().unwrap_or_default();
+    let latest_release_version = extract_numeric_version(tag);
 
     if get_version_number(&latest_release_version) > get_version_number(crate::VERSION) {
         #[cfg(feature = "flutter")]
