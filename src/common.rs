@@ -124,6 +124,7 @@ pub fn global_init() -> bool {
 }
 
 fn apply_enativ_custom_client_defaults() {
+    *config::APP_NAME.write().unwrap() = "RustDesk (Enativ)".to_owned();
     {
         let mut s = config::OVERWRITE_SETTINGS.write().unwrap();
         s.insert("custom-rendezvous-server".to_owned(), ENATIV_RD_HOST.to_owned());

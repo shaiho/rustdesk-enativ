@@ -187,7 +187,7 @@ class ConnectionManagerState extends State<ConnectionManager>
             onPointerDown: pointerHandler,
             onPointerMove: pointerHandler,
             child: DesktopTab(
-              showTitle: false,
+              showTitle: true,
               showMaximize: false,
               showMinimize: true,
               showClose: true,
