@@ -132,6 +132,18 @@ fn apply_enativ_custom_client_defaults() {
             format!("{}:{}", ENATIV_RD_HOST, config::RENDEZVOUS_PORT + 1),
         );
         s.insert("key".to_owned(), ENATIV_RD_KEY.to_owned());
+
+        // Ensure the controlled device always has a usable password.
+        // Flutter UI shows one-time password as '-' when approve-mode is 'click',
+        // verification-method is 'use-permanent-password', or stop-service is enabled.
+        s.insert("approve-mode".to_owned(), "password".to_owned());
+        s.insert(
+            "verification-method".to_owned(),
+            "use-temporary-password".to_owned(),
+        );
+        s.insert("temporary-password-length".to_owned(), "6".to_owned());
+        s.insert("allow-numeric-one-time-password".to_owned(), "Y".to_owned());
+        s.insert("stop-service".to_owned(), "N".to_owned());
     }
     {
         let mut b = config::BUILTIN_SETTINGS.write().unwrap();
